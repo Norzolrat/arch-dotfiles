@@ -30,12 +30,11 @@ as_user() { sudo -u "$USERNAME" bash -lc "$*"; }
 # Copy tree into destination (preserve perms, delete stale files)
 sync_dir_to_user() { # src dest_dir
   local src="$1" dest="$2"
-  as_user "
-    set -e
-    mkdir -p \"$dest\"
-    rsync -a --delete \"$src\"/ \"$dest\"/
-  "
+  mkdir -p "$dest"
+  # run as root, set owner on the fly
+  rsync -a --delete --chown="$USERNAME:$USERNAME" "$src"/ "$dest"/
 }
+
 
 ### ======= System prep =======
 tune_pacman() {
@@ -146,7 +145,7 @@ install_docker() {
 
 install_libvirt() {
   $ENABLE_LIBVIRT || return 0
-  pac libvirt qemu-full edk2-ovmf dnsmasq iptables-nft bridge-utils virt-manager spice-gtk virt-viewer
+  pac libvirt qemu-full edk2-ovmf dnsmasq bridge-utils virt-manager spice-gtk virt-viewer
   enable libvirtd
 
   # make sure groups exist, then add the user
