@@ -115,6 +115,65 @@ install_desktop() {
   pac noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-dejavu ttf-liberation ttf-font-awesome
 }
 
+install_user_stack() {
+  # --- GUI apps (repo) ---
+  pac firefox bitwarden code discord steam obs-studio thunderbird \
+      onlyoffice-desktopeditors remmina freerdp \
+      virt-manager spice-gtk virt-viewer \
+      vlc mpv qbittorrent \
+      gnome-keyring seahorse libsecret \
+      file-roller p7zip unrar \
+      fastfetch btop htop lm_sensors powertop
+
+  # Enable sensor utils (optional)
+  sensors-detect --auto || true
+
+  # Printing & mDNS (optional but handy)
+  pac cups system-config-printer avahi nss-mdns
+  enable avahi-daemon
+  # enable cups  # <- uncomment if you want printing right away
+
+  # --- Dev toolchain & terminals (repo) ---
+  pac git neovim tmux ripgrep fd jq tree \
+      python python-pip go nodejs npm \
+      starship eza bat fzf unzip zip
+
+  # --- AUR bits ---
+  as_user 'yay -S --noconfirm --needed \
+      mission-center \
+      ttf-jetbrains-mono-nerd nerd-fonts-symbols-only ttf-material-design-icons'
+
+  # --- Fish goodies (user-level) ---
+  as_user '
+    if command -v starship >/dev/null 2>&1; then
+      mkdir -p ~/.config/fish/conf.d
+      echo "starship init fish | source" > ~/.config/fish/conf.d/starship.fish
+    fi
+  '
+
+  # --- Nix (nix-shell) ---
+  pac nix
+  groupadd -f nix-users
+  usermod -aG nix-users "$USERNAME" || true
+  systemctl enable --now nix-daemon.service
+
+  # Fish integration for Nix
+  as_user '
+    mkdir -p ~/.config/fish/conf.d
+    echo "status --is-login; and test -r /etc/profile.d/nix-daemon.sh; and source /etc/profile.d/nix-daemon.sh" > ~/.config/fish/conf.d/nix.fish
+  '
+
+  # Enable flakes / modern CLI (optional)
+  mkdir -p /etc/nix
+  if ! grep -q "experimental-features" /etc/nix/nix.conf 2>/dev/null; then
+    echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+  fi
+
+  # Initialize store (harmless if already initialized)
+  nix-store --init || true
+}
+
+
 install_yay() {
   if ! command -v yay &>/dev/null; then
     pac base-devel git
@@ -207,6 +266,7 @@ main() {
   install_docker
   install_libvirt
   install_noctalia
+  install_user_stack
 
   copy_all_dots_into_config
   ensure_noctalia_autostart
