@@ -1,0 +1,11 @@
+[window]
+# Supprimer la décoration (pas de bordures, pas de barre de titre)
+decorations = "none"
+
+# Définir du padding (marges internes dans le terminal)
+padding.x = 10
+padding.y = 10
+
+[terminal.shell]
+program = "/run/current-system/sw/bin/fish"
+args = ["-l"]
