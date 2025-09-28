@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# arch-config.sh — Install core desktop + wire your dotfiles from ./dots
+# arch-config.sh — Arch setup + dotfiles (COPY mode, no symlinks)
 # Run as root from the repo root (the folder that contains ./dots).
 
 set -euo pipefail
@@ -15,9 +15,9 @@ LANG_DEFAULT="${LANG_DEFAULT:-en_US.UTF-8}"
 ENABLE_DOCKER=${ENABLE_DOCKER:-true}
 ENABLE_LIBVIRT=${ENABLE_LIBVIRT:-true}
 CREATE_USER=${CREATE_USER:-true}
-ENABLE_NOCTALIA=${ENABLE_NOCTALIA:-true}     # <--- NEW: install and autostart Noctalia
+ENABLE_NOCTALIA=${ENABLE_NOCTALIA:-true}   # install + autostart noctalia-shell
 
-### ======= Helpers =======
+### ======= Paths & helpers =======
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTS_DIR="${SCRIPT_DIR}/dots"
 
@@ -26,6 +26,16 @@ need_root() { [[ $EUID -eq 0 ]] || die "Run as root."; }
 pac() { pacman --noconfirm --needed -S "$@"; }
 enable() { systemctl enable "$1"; systemctl start "$1" || true; }
 as_user() { sudo -u "$USERNAME" bash -lc "$*"; }
+
+# Copy tree into destination (preserve perms, delete stale files)
+sync_dir_to_user() { # src dest_dir
+  local src="$1" dest="$2"
+  as_user "
+    set -e
+    mkdir -p \"$dest\"
+    rsync -a --delete \"$src\"/ \"$dest\"/
+  "
+}
 
 ### ======= System prep =======
 tune_pacman() {
@@ -148,80 +158,37 @@ options kvm ignore_msrs=1
 EOF
 }
 
-### ======= Noctalia (AUR) =======
 install_noctalia() {
   $ENABLE_NOCTALIA || return 0
-  # Install Noctalia (this pulls Quickshell and deps via AUR)
   as_user 'yay -S --noconfirm --needed noctalia-shell'
 }
 
-### ======= Dotfiles wiring (./dots layout) =======
-link_into_home() {
-  local src="$1" dest="$2"
-  as_user "
-    set -e
-    mkdir -p \"\$(dirname \"$dest\")\"
-    ln -sfn \"$src\" \"$dest\"
-  "
-}
-
-copy_into_root() {
-  local src="$1" dest="$2"
-  mkdir -p "$(dirname "$dest")"
-  cp -f "$src" "$dest"
-}
-
-setup_dotfiles() {
-  [[ -d "$DOTS_DIR" ]] || { echo "Skip dotfiles: $DOTS_DIR missing"; return 0; }
+### ======= Dotfiles (COPY EVERYTHING under ./dots into ~/.config) =======
+copy_all_dots_into_config() {
+  [[ -d "$DOTS_DIR" ]] || { echo "Skip dotfiles copy: $DOTS_DIR missing"; return 0; }
   local H="/home/$USERNAME"
   [[ -d "$H" ]] || die "Home directory $H not found."
 
-  # Alacritty
-  if [[ -d "$DOTS_DIR/alacritty" ]]; then
-    link_into_home "$DOTS_DIR/alacritty" "$H/.config/alacritty"
+  # 1) Copy every subfolder/file from ./dots into ~/.config (one flat rule)
+  sync_dir_to_user "$DOTS_DIR" "$H/.config"
+
+  # 2) Optional quality-of-life: if wallpapers landed in ~/.config/wallpapers, mirror them to ~/Pictures/wallpapers
+  if as_user "[ -d \"$H/.config/wallpapers\" ]"; then
+    as_user "mkdir -p \"$H/Pictures/wallpapers\" && rsync -a --delete \"$H/.config/wallpapers/\" \"$H/Pictures/wallpapers/\""
   fi
 
-  # gtklock
-  if [[ -d "$DOTS_DIR/gtklock" ]]; then
-    link_into_home "$DOTS_DIR/gtklock" "$H/.config/gtklock"
-  fi
+  # 3) Optional: if quickshell config is under ~/.config/quickshell/noctalia-shell, good; nothing else needed
 
-  # Hyprland configs & shaders
-  local HYPRCFG="$DOTS_DIR/hypr"
-  if [[ -d "$HYPRCFG" ]]; then
-    as_user "mkdir -p \"$H/.config/hypr\" \"$H/.config/hypr/shaders\""
-    if [[ -f "$HYPRCFG/hyprland.conf" ]]; then
-      link_into_home "$HYPRCFG/hyprland.conf" "$H/.config/hypr/hyprland.conf"
-    fi
-    if [[ -d "$HYPRCFG/hyprland" ]]; then
-      for f in "$HYPRCFG/hyprland"/*.conf; do
-        [[ -e "$f" ]] || continue
-        link_into_home "$f" "$H/.config/hypr/$(basename "$f")"
-      done
-      if [[ -d "$HYPRCFG/hyprland/scripts" ]]; then
-        link_into_home "$HYPRCFG/hyprland/scripts" "$H/.config/hypr/scripts"
-      fi
-    fi
-    if [[ -d "$HYPRCFG/shaders" ]]; then
-      link_into_home "$HYPRCFG/shaders" "$H/.config/hypr/shaders"
-    fi
-  fi
-
-  # Wallpapers -> ~/Pictures/wallpapers
-  if [[ -d "$DOTS_DIR/wallpapers" ]]; then
-    as_user "mkdir -p \"$H/Pictures\""
-    link_into_home "$DOTS_DIR/wallpapers" "$H/Pictures/wallpapers"
-  fi
-
-  # Faces -> set GDM avatar (first image found)
-  if [[ -d "$DOTS_DIR/faces" ]]; then
+  # 4) Optional: GDM face from ~/.config/faces (first image)
+  if as_user "[ -d \"$H/.config/faces\" ]"; then
     local face
-    face="$(find "$DOTS_DIR/faces" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | head -n1 || true)"
+    face="$(find \"$H/.config/faces\" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | head -n1 || true)"
     if [[ -n "${face:-}" ]]; then
       local icond="/var/lib/AccountsService/icons"
       local usersd="/var/lib/AccountsService/users"
       mkdir -p "$icond" "$usersd"
-      copy_into_root "$face" "$icond/$USERNAME"
+      # copy as root from user's config path
+      cp -f $H/.config/faces/$(basename "$face") "$icond/$USERNAME" 2>/dev/null || cp -f "$H/.config/faces/"* "$icond/$USERNAME" 2>/dev/null || true
       {
         echo "[User]"
         echo "Icon=$icond/$USERNAME"
@@ -229,7 +196,24 @@ setup_dotfiles() {
     fi
   fi
 
+  # 5) Ensure ownership
   chown -R "$USERNAME:$USERNAME" "$H/.config" "$H/Pictures" 2>/dev/null || true
+}
+
+### ======= Hyprland: ensure Noctalia autostarts =======
+ensure_noctalia_autostart() {
+  $ENABLE_NOCTALIA || return 0
+  local H="/home/$USERNAME"
+  local HYPR_MAIN="$H/.config/hypr/hyprland.conf"
+
+  as_user "mkdir -p \"$(dirname "$HYPR_MAIN")\""
+  if as_user "test -f '$HYPR_MAIN'"; then
+    if ! as_user "grep -qE '^\s*exec-once\s*=\s*qs\s+-c\s+noctalia-shell' '$HYPR_MAIN'"; then
+      as_user "printf '\n# Noctalia autostart\nexec-once = qs -c noctalia-shell\n' >> '$HYPR_MAIN'"
+    fi
+  else
+    as_user "printf '# Hyprland — autogenerated\nexec-once = qs -c noctalia-shell\n' > '$HYPR_MAIN'"
+  fi
 }
 
 ### ======= Main =======
@@ -252,18 +236,17 @@ main() {
   install_aur_goodies
   install_docker
   install_libvirt
-
-  setup_dotfiles
-
-  # Install + autostart Noctalia
   install_noctalia
+
+  copy_all_dots_into_config
+  ensure_noctalia_autostart
 
   echo
   echo "✅ Done."
   echo "- User: $USERNAME (default shell: fish)"
   echo "- KEYMAP (console): $KEYMAP ; XKB default: us"
   echo "- Display manager: GDM (Wayland). Session: Hyprland"
-  echo "- Dotfiles linked from: $DOTS_DIR"
+  echo "- Dotfiles copied from: $DOTS_DIR -> ~/.config (rsync --delete)"
   $ENABLE_NOCTALIA && echo "- Noctalia installed and set to autostart (qs -c noctalia-shell)."
   $ENABLE_DOCKER && echo "- Docker enabled (relog for group membership)."
   $ENABLE_LIBVIRT && echo "- libvirtd enabled."
