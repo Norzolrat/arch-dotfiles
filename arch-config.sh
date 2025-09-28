@@ -77,7 +77,7 @@ sudo_wheel() {
 
 maybe_create_user() {
   if $CREATE_USER && ! id -u "$USERNAME" &>/dev/null; then
-    useradd -m -G wheel,audio,video,storage,input,kvm,libvirt "$USERNAME"
+    useradd -m -G wheel,audio,video,storage,input "$USERNAME"
     echo "Set password for $USERNAME:"
     passwd "$USERNAME"
   fi
@@ -85,7 +85,7 @@ maybe_create_user() {
 
 ### ======= Packages / services =======
 install_base() {
-  pac -Syu --noconfirm
+  pacman -Syu --noconfirm
   pac base-devel git curl wget rsync unzip zip bash-completion linux-headers \
       networkmanager iwd openssh reflector dmidecode fish
   enable NetworkManager
@@ -142,21 +142,29 @@ install_aur_goodies() {
 install_docker() {
   $ENABLE_DOCKER || return 0
   pac docker docker-compose
+  groupadd -f docker
   usermod -aG docker "$USERNAME" || true
   enable docker
 }
 
+
 install_libvirt() {
   $ENABLE_LIBVIRT || return 0
   pac libvirt qemu-full edk2-ovmf dnsmasq iptables-nft bridge-utils virt-manager spice-gtk virt-viewer
-  usermod -aG libvirt,kvm "$USERNAME" || true
   enable libvirtd
+
+  # make sure groups exist, then add the user
+  groupadd -f libvirt
+  groupadd -f kvm
+  usermod -aG libvirt,kvm "$USERNAME" || true
+
   cat >/etc/modprobe.d/kvm-intel.conf <<'EOF'
 options kvm_intel nested=1
 options kvm_intel emulate_invalid_guest_state=0
 options kvm ignore_msrs=1
 EOF
 }
+
 
 install_noctalia() {
   $ENABLE_NOCTALIA || return 0
