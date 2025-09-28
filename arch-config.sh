@@ -112,9 +112,8 @@ install_desktop() {
   enable fwupd
   enable upower
 
-  # Fonts / icons / cursor
-  pac noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-dejavu ttf-liberation \
-      adwaita-qt papirus-icon-theme bibata-cursor-theme ttf-font-awesome
+  # Fonts / icons
+  pac noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-dejavu ttf-liberation ttf-font-awesome
 }
 
 install_yay() {
