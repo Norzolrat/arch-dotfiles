@@ -7,5 +7,5 @@ padding.x = 10
 padding.y = 10
 
 [terminal.shell]
-program = "/run/current-system/sw/bin/fish"
+program = "/usr/bin/fish"
 args = ["-l"]
